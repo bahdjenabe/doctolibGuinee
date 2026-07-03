@@ -66,9 +66,18 @@ export default function PaymentSuccess({
       <h2 className="text-2xl font-bold text-gray-900 mb-2">
         Paiement réussi ! 🎉
       </h2>
-      <p className="text-gray-500 font-light text-sm mb-8">
-        Votre rendez-vous est confirmé et sécurisé.
+      <p className="text-gray-500 font-light text-sm mb-4">
+        Votre demande de rendez-vous a bien été envoyée.
       </p>
+
+      {/* ── Bandeau "en attente de validation" ── */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700 mb-8 text-left flex items-start gap-2">
+        <span className="text-base leading-none">⏳</span>
+        <span>
+          <strong>En attente de confirmation</strong> — le médecin doit valider
+          votre rendez-vous. Vous serez notifié dès qu&apos;il sera confirmé.
+        </span>
+      </div>
 
       {/* ── Récapitulatif du RDV ── */}
       <div className="bg-gray-50 rounded-2xl p-5 text-left space-y-3 mb-6">

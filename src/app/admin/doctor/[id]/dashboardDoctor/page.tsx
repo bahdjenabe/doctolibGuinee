@@ -38,7 +38,10 @@ import DoctorStatsCards from "@/components/dashboardDoctor/DoctorStatsCards";
 import QuickActions from "@/components/dashboardDoctor/QuickActions";
 import TodayAppointments from "@/components/dashboardDoctor/TodayAppointments";
 import RecentActivity from "@/components/dashboardDoctor/RecentActivity";
-import ProtectedRoute from "@/components/ProtectedRoute";
+import PendingRequestsAlert from "@/components/dashboardDoctor/PendingRequestsAlert";
+import DoctorReviewsSection from "@/components/dashboardDoctor/DoctorReviewsSection";
+import DoctorRoute from "@/components/DoctorRoute";
+import { Review } from "@/types/review";
 
 // Composants
 
@@ -107,6 +110,8 @@ export default function DoctorDashboardPage() {
   const [doctor, setDoctor] = useState<Doctor | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loadingReviews, setLoadingReviews] = useState(true);
 
   // ── Chargement du médecin ──
   useEffect(() => {
@@ -154,6 +159,35 @@ export default function DoctorDashboardPage() {
     return () => unsub();
   }, [id]);
 
+  // ── Écoute temps réel des avis du médecin ──
+  useEffect(() => {
+    if (!id) return;
+
+    const q = query(
+      collection(db, "reviews"),
+      where("doctorId", "==", id as string),
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const data: Review[] = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as Omit<Review, "id">),
+      }));
+
+      // Tri par date décroissante (plus récent en premier), côté client
+      data.sort((a, b) => {
+        const ta = a.createdAt?.toDate?.()?.getTime() || 0;
+        const tb = b.createdAt?.toDate?.()?.getTime() || 0;
+        return tb - ta;
+      });
+
+      setReviews(data);
+      setLoadingReviews(false);
+    });
+
+    return () => unsub();
+  }, [id]);
+
   // ── Calcul des stats ──
 
   // RDV confirmés aujourd'hui
@@ -176,6 +210,11 @@ export default function DoctorDashboardPage() {
     (a) => a.status === "cancelled",
   ).length;
 
+  // Demandes en attente de validation
+  const pendingCount = appointments.filter(
+    (a) => a.status === "pending",
+  ).length;
+
   // Prochain patient du jour (premier RDV du jour pas encore passé)
   const nextAppt = todayAppointments.find((a) => isUpcoming(a.date));
   const nextPatient = nextAppt?.patientName || null;
@@ -189,7 +228,7 @@ export default function DoctorDashboardPage() {
   // ── Loading ──
   if (loading || !doctor) {
     return (
-      <ProtectedRoute>
+      <DoctorRoute doctorId={id as string}>
         <main className="min-h-screen flex items-center justify-center bg-gray-50">
           <div className="flex flex-col items-center gap-3">
             <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
@@ -198,7 +237,7 @@ export default function DoctorDashboardPage() {
             </p>
           </div>
         </main>
-      </ProtectedRoute>
+      </DoctorRoute>
     );
   }
 
@@ -206,7 +245,7 @@ export default function DoctorDashboardPage() {
   // RENDER
   // ============================================================
   return (
-    <ProtectedRoute>
+    <DoctorRoute doctorId={id as string}>
       <main className="min-h-screen bg-gray-50">
         {/* ── Header ── */}
         <DoctorDashboardHeader
@@ -216,6 +255,9 @@ export default function DoctorDashboardPage() {
         />
 
         <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+          {/* ── Alerte demandes à valider ── */}
+          <PendingRequestsAlert doctorId={doctor.id} count={pendingCount} />
+
           {/* ── Carte de bienvenue ── */}
           <DoctorWelcomeCard
             doctorName={doctor.name}
@@ -241,14 +283,19 @@ export default function DoctorDashboardPage() {
             {/* RDV du jour */}
             <TodayAppointments
               doctorId={doctor.id}
+              doctorName={doctor.name}
+              specialty={doctor.specialty}
               appointments={todayAppointments}
             />
 
             {/* Activité récente */}
             <RecentActivity appointments={appointments} />
           </div>
+
+          {/* ── Avis des patients ── */}
+          <DoctorReviewsSection reviews={reviews} loading={loadingReviews} />
         </div>
       </main>
-    </ProtectedRoute>
+    </DoctorRoute>
   );
 }

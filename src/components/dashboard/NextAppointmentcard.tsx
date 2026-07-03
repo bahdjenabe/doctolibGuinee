@@ -9,13 +9,19 @@
 import { useRouter } from "next/navigation";
 import { Appointment } from "@/types/appointment";
 import { formatDate, getSpecialtyEmoji } from "@/lib/dashboard";
+import { joinWindow } from "@/lib/consultation";
 
 type Props = {
   appointment: Appointment | null; // prochain RDV (null si aucun)
   onCancel: (id: string) => void; // callback pour annuler
+  onReschedule: (id: string) => void; // callback pour reprogrammer
 };
 
-export default function NextAppointmentCard({ appointment, onCancel }: Props) {
+export default function NextAppointmentCard({
+  appointment,
+  onCancel,
+  onReschedule,
+}: Props) {
   const router = useRouter();
 
   // Aucun RDV à venir → carte vide avec CTA
@@ -59,6 +65,13 @@ export default function NextAppointmentCard({ appointment, onCancel }: Props) {
             {getSpecialtyEmoji(appointment.specialty)} {appointment.specialty}
           </p>
 
+          {/* Badge mode visio */}
+          {appointment.type === "video" && (
+            <span className="inline-flex items-center gap-1 mt-2 bg-white/15 border border-white/20 text-white text-[11px] font-medium px-2.5 py-1 rounded-full">
+              📹 Téléconsultation vidéo
+            </span>
+          )}
+
           {/* Date */}
           <p className="text-blue-100 text-sm mt-3 font-medium">
             📅 {formatDate(appointment.date)}
@@ -70,13 +83,30 @@ export default function NextAppointmentCard({ appointment, onCancel }: Props) {
           </p>
         </div>
 
-        {/* Bouton annuler */}
-        <button
-          onClick={() => onCancel(appointment.id)}
-          className="text-xs text-white/50 hover:text-white/90 border border-white/20 hover:border-white/40 px-3 py-1.5 rounded-lg transition-all flex-shrink-0"
-        >
-          Annuler
-        </button>
+        {/* Boutons reprogrammer / annuler */}
+        <div className="flex flex-col gap-2 flex-shrink-0">
+          {appointment.type === "video" &&
+            joinWindow(appointment.date).open && (
+              <button
+                onClick={() => router.push(`/consultation/${appointment.id}`)}
+                className="text-xs font-semibold text-blue-900 bg-yellow-400 hover:bg-yellow-300 px-3 py-1.5 rounded-lg transition-all"
+              >
+                🎥 Rejoindre
+              </button>
+            )}
+          <button
+            onClick={() => onReschedule(appointment.id)}
+            className="text-xs text-white bg-white/15 hover:bg-white/25 border border-white/20 px-3 py-1.5 rounded-lg transition-all"
+          >
+            Reprogrammer
+          </button>
+          <button
+            onClick={() => onCancel(appointment.id)}
+            className="text-xs text-white/50 hover:text-white/90 border border-white/20 hover:border-white/40 px-3 py-1.5 rounded-lg transition-all"
+          >
+            Annuler
+          </button>
+        </div>
       </div>
     </div>
   );

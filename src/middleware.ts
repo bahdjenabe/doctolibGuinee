@@ -61,9 +61,13 @@ export function middleware(request: NextRequest) {
   const isLoggedIn = !!session;
 
   // ── 1. Routes protégées : redirige vers /login si non connecté ──
-  const isProtected = PROTECTED_ROUTES.some((route) =>
-    pathname.startsWith(route)
-  );
+  // Inclut l'agenda médecin (/doctor/<id>/doctorAgenda) qui est sous
+  // /doctor (public) mais ne doit pas être accessible sans connexion.
+  // La vérification de PROPRIÉTÉ (bon médecin) est faite par DoctorRoute.
+  const isDoctorSpace = /^\/doctor\/[^/]+\/doctorAgenda/.test(pathname);
+  const isProtected =
+    isDoctorSpace ||
+    PROTECTED_ROUTES.some((route) => pathname.startsWith(route));
 
   if (isProtected && !isLoggedIn) {
     // Garde l'URL d'origine en paramètre pour y revenir après login

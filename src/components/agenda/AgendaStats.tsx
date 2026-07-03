@@ -9,6 +9,7 @@
 import { AgendaFilter } from "@/types/agenda";
 
 type Props = {
+  pendingCount: number;
   todayCount: number;
   upcomingCount: number;
   pastCount: number;
@@ -18,6 +19,7 @@ type Props = {
 };
 
 export default function AgendaStats({
+  pendingCount,
   todayCount,
   upcomingCount,
   pastCount,
@@ -26,6 +28,14 @@ export default function AgendaStats({
   onFilter,
 }: Props) {
   const cards = [
+    {
+      label: "À valider",
+      count: pendingCount,
+      filter: "pending" as AgendaFilter,
+      color: "text-amber-600",
+      activeBg: "bg-amber-50",
+      activeBorder: "border-amber-500",
+    },
     {
       label: "Aujourd'hui",
       count: todayCount,
@@ -61,7 +71,7 @@ export default function AgendaStats({
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
       {cards.map((card) => {
         const isActive = activeFilter === card.filter;
         return (

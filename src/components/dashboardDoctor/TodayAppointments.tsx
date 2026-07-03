@@ -6,18 +6,25 @@
 // Triés par heure, avec statut coloré
 // ============================================================
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { joinWindow } from "@/lib/consultation";
+import PrescriptionModal from "@/components/documents/PrescriptionModal";
 
 type Appointment = {
   id: string;
+  patientId?: string;
   patientName: string;
   date: string;
   status: string;
   cancelledBy?: string;
+  type?: "cabinet" | "video";
 };
 
 type Props = {
   doctorId: string;
+  doctorName?: string;
+  specialty?: string;
   appointments: Appointment[]; // RDV du jour uniquement
 };
 
@@ -36,8 +43,15 @@ const isPast = (dateStr: string): boolean => {
   return new Date(local).getTime() < Date.now();
 };
 
-export default function TodayAppointments({ doctorId, appointments }: Props) {
+export default function TodayAppointments({
+  doctorId,
+  doctorName,
+  specialty,
+  appointments,
+}: Props) {
   const router = useRouter();
+  // RDV pour lequel on rédige une ordonnance (null = modal fermé)
+  const [prescribeFor, setPrescribeFor] = useState<Appointment | null>(null);
 
   return (
     <div>
@@ -126,7 +140,35 @@ export default function TodayAppointments({ doctorId, appointments }: Props) {
                     Consultation passée
                   </p>
                 )}
+                {appt.type === "video" && !cancelled && (
+                  <p className="text-[11px] text-blue-600 mt-0.5 font-medium">
+                    📹 Téléconsultation
+                  </p>
+                )}
               </div>
+
+              {/* Bouton rejoindre la visio (dans la fenêtre d'accès) */}
+              {appt.type === "video" &&
+                !cancelled &&
+                joinWindow(appt.date).open && (
+                  <button
+                    onClick={() => router.push(`/consultation/${appt.id}`)}
+                    className="flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-700 text-white hover:bg-blue-800 transition-colors"
+                  >
+                    🎥 Rejoindre
+                  </button>
+                )}
+
+              {/* Rédiger une ordonnance */}
+              {!cancelled && appt.patientId && (
+                <button
+                  onClick={() => setPrescribeFor(appt)}
+                  title="Rédiger une ordonnance"
+                  className="flex-shrink-0 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  💊
+                </button>
+              )}
 
               {/* Badge statut */}
               <span
@@ -144,6 +186,19 @@ export default function TodayAppointments({ doctorId, appointments }: Props) {
           );
         })}
       </div>
+
+      {/* Modal ordonnance */}
+      {prescribeFor && prescribeFor.patientId && (
+        <PrescriptionModal
+          doctorId={doctorId}
+          doctorName={doctorName || "Médecin"}
+          specialty={specialty}
+          patientId={prescribeFor.patientId}
+          patientName={prescribeFor.patientName || "Patient"}
+          appointmentId={prescribeFor.id}
+          onClose={() => setPrescribeFor(null)}
+        />
+      )}
     </div>
   );
 }

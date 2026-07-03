@@ -20,7 +20,7 @@
 //   - Annulation → updateDoc status:"cancelled" + notifie le médecin
 // ============================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   collection,
@@ -29,6 +29,7 @@ import {
   onSnapshot,
   doc,
   updateDoc,
+  getDocs,
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -36,14 +37,22 @@ import { useAuth } from "@/context/AuthContext";
 
 // Types + helpers
 import { isUpcoming, parseDate } from "@/lib/dashboard";
-import { notifyDoctorOfCancellation } from "@/hooks/useNotifications";
+import { getDueReminder, sendReminder } from "@/lib/reminders";
+import { submitReview } from "@/lib/reviews";
+import {
+  notifyDoctorOfCancellation,
+  notifyDoctorOfReschedule,
+} from "@/hooks/useNotifications";
 
 // Composants
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import StatsCards from "@/components/dashboard/StatsCards";
 import AppointmentList from "@/components/dashboard/AppointmentList";
 import CancelModal from "@/components/dashboard/CancelModal";
+import RescheduleModal from "@/components/dashboard/RescheduleModal";
 import NextAppointmentCard from "@/components/dashboard/NextAppointmentcard";
+import ReminderBanner from "@/components/dashboard/ReminderBanner";
+import ReviewModal from "@/components/dashboard/ReviewModal";
 import { Appointment, Filter } from "@/types/appointment";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
@@ -61,6 +70,19 @@ export default function DashboardPage() {
   const [filter, setFilter] = useState<Filter>("upcoming");
   const [cancelId, setCancelId] = useState<string | null>(null); // ID du RDV à annuler
   const [cancelling, setCancelling] = useState(false);
+  const [rescheduleId, setRescheduleId] = useState<string | null>(null); // RDV à reprogrammer
+  const [rescheduling, setRescheduling] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState("");
+
+  // Rappels déjà déclenchés pendant cette session (clé: "apptId:kind")
+  // Évite les doublons avant que les drapeaux Firestore ne se propagent.
+  const remindedRef = useRef<Set<string>>(new Set());
+
+  // Avis
+  const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set()); // RDV déjà notés
+  const [reviewAppt, setReviewAppt] = useState<Appointment | null>(null); // RDV à noter
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState("");
 
   // ── Protection de route ──
   // Si non connecté → redirige vers /login
@@ -95,9 +117,59 @@ export default function DashboardPage() {
     return () => unsub();
   }, [user]);
 
+  // ── Écoute des avis déjà laissés par le patient ──
+  // Sert à savoir quels RDV passés ont déjà été notés.
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, "reviews"),
+      where("patientId", "==", user.uid),
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      setReviewedIds(
+        new Set(snap.docs.map((d) => d.data().appointmentId as string)),
+      );
+    });
+
+    return () => unsub();
+  }, [user]);
+
+  // ── Rappels automatiques avant RDV ──
+  // À l'ouverture du dashboard et toutes les 5 min tant qu'il est ouvert,
+  // on génère les rappels dus (J-1 et imminent ≤2h). Déduplication via
+  // le ref de session + les drapeaux Firestore (voir lib/reminders.ts).
+  useEffect(() => {
+    if (!user) return;
+
+    const patientName = user.displayName || user.email || "Patient";
+
+    const run = () => {
+      appointments.forEach((a) => {
+        const kind = getDueReminder(a as any);
+        if (!kind) return;
+
+        const key = `${a.id}:${kind}`;
+        if (remindedRef.current.has(key)) return;
+        remindedRef.current.add(key); // marque tout de suite (optimiste)
+
+        sendReminder(user.uid, patientName, a as any, kind);
+      });
+    };
+
+    run();
+    const interval = setInterval(run, 5 * 60 * 1000); // toutes les 5 min
+    return () => clearInterval(interval);
+  }, [appointments, user]);
+
   // ── Calcul des listes filtrées ──
+  // "À venir" regroupe les RDV confirmés ET les demandes en attente
+  // (pending) à venir, pour que le patient suive ses demandes.
   const upcoming = appointments.filter(
-    (a) => a.status === "confirmed" && isUpcoming(a.date),
+    (a) =>
+      (a.status === "confirmed" || a.status === "pending") &&
+      isUpcoming(a.date),
   );
   const past = appointments.filter(
     (a) => a.status === "confirmed" && !isUpcoming(a.date),
@@ -107,14 +179,24 @@ export default function DashboardPage() {
   // Liste affichée selon le filtre actif
   const filtered = { upcoming, past, cancelled }[filter];
 
-  // Prochain RDV (le plus proche dans le temps)
+  // Prochain RDV en hero : uniquement un RDV CONFIRMÉ (une demande en
+  // attente n'est pas encore un rendez-vous garanti).
+  const confirmedUpcoming = upcoming.filter((a) => a.status === "confirmed");
   const nextAppointment =
-    upcoming.length > 0
-      ? upcoming.reduce((closest, a) =>
+    confirmedUpcoming.length > 0
+      ? confirmedUpcoming.reduce((closest, a) =>
           parseDate(a.date).getTime() < parseDate(closest.date).getTime()
             ? a
             : closest,
         )
+      : null;
+
+  // RDV imminent (≤ 24h) → bannière de rappel
+  const imminentAppointment =
+    nextAppointment &&
+    parseDate(nextAppointment.date).getTime() - Date.now() <=
+      24 * 60 * 60 * 1000
+      ? nextAppointment
       : null;
 
   // ── Annulation d'un RDV ──
@@ -147,6 +229,105 @@ export default function DashboardPage() {
       console.error("Erreur annulation:", err);
     } finally {
       setCancelling(false);
+    }
+  };
+
+  // ── Reprogrammation d'un RDV ──
+  // Met à jour la date du RDV existant (l'ancien créneau est libéré
+  // automatiquement). Le paiement n'est pas redemandé.
+  const handleReschedule = async (newSlot: number) => {
+    if (!rescheduleId) return;
+
+    const appt = appointments.find((a) => a.id === rescheduleId);
+    if (!appt) return;
+
+    setRescheduling(true);
+    setRescheduleError("");
+
+    try {
+      // Refus d'un créneau passé (sécurité)
+      if (newSlot < Date.now()) {
+        setRescheduleError("Ce créneau est déjà passé. Choisissez-en un autre.");
+        setRescheduling(false);
+        return;
+      }
+
+      // Construit la date au même format que la création de RDV
+      const d = new Date(newSlot);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const dateString =
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+        `T${pad(d.getHours())}:${pad(d.getMinutes())}:00.000`;
+
+      // Vérifie que le créneau n'est pas déjà pris chez ce médecin
+      const conflictQ = query(
+        collection(db, "appointments"),
+        where("doctorId", "==", appt.doctorId),
+        where("date", "==", dateString),
+        where("status", "in", ["confirmed", "pending"]),
+      );
+      const conflictSnap = await getDocs(conflictQ);
+      const taken = conflictSnap.docs.some((doc) => doc.id !== rescheduleId);
+      if (taken) {
+        setRescheduleError("Ce créneau vient d'être pris. Choisissez-en un autre.");
+        setRescheduling(false);
+        return;
+      }
+
+      // Conserve l'ancienne date pour la notification
+      const oldDate = appt.date;
+
+      // Met à jour la date du RDV
+      await updateDoc(doc(db, "appointments", rescheduleId), {
+        date: dateString,
+        rescheduledAt: serverTimestamp(),
+      });
+
+      // Notifie le médecin du changement de créneau
+      await notifyDoctorOfReschedule({
+        doctorId: appt.doctorId,
+        appointmentId: rescheduleId,
+        patientName: user?.displayName || user?.email || "Un patient",
+        doctorName: appt.doctorName,
+        oldDate,
+        newDate: dateString,
+      });
+
+      setRescheduleId(null);
+    } catch (err) {
+      console.error("Erreur reprogrammation:", err);
+      setRescheduleError("Une erreur est survenue. Réessayez.");
+    } finally {
+      setRescheduling(false);
+    }
+  };
+
+  // ── Soumission d'un avis ──
+  const handleSubmitReview = async (rating: number, comment: string) => {
+    if (!reviewAppt || !user) return;
+
+    setSubmittingReview(true);
+    setReviewError("");
+
+    try {
+      await submitReview({
+        doctorId: reviewAppt.doctorId,
+        patientId: user.uid,
+        patientName: user.displayName || user.email || "Patient",
+        appointmentId: reviewAppt.id,
+        rating,
+        comment,
+      });
+      setReviewAppt(null);
+    } catch (err: any) {
+      console.error("Erreur avis:", err);
+      setReviewError(
+        err?.message === "REVIEW_ALREADY_EXISTS"
+          ? "Vous avez déjà laissé un avis pour ce rendez-vous."
+          : "Une erreur est survenue. Réessayez.",
+      );
+    } finally {
+      setSubmittingReview(false);
     }
   };
 
@@ -193,10 +374,14 @@ export default function DashboardPage() {
             </p>
           </div>
 
+          {/* ── Bannière de rappel (RDV ≤ 24h) ── */}
+          <ReminderBanner appointment={imminentAppointment} />
+
           {/* ── Prochain RDV ── */}
           <NextAppointmentCard
             appointment={nextAppointment}
             onCancel={setCancelId}
+            onReschedule={setRescheduleId}
           />
 
           {/* ── Cartes stats ── */}
@@ -215,6 +400,9 @@ export default function DashboardPage() {
             loading={loading}
             onFilter={setFilter}
             onCancel={setCancelId}
+            onReschedule={setRescheduleId}
+            reviewedIds={reviewedIds}
+            onReview={setReviewAppt}
           />
         </div>
 
@@ -224,6 +412,39 @@ export default function DashboardPage() {
             cancelling={cancelling}
             onConfirm={handleCancel}
             onClose={() => setCancelId(null)}
+          />
+        )}
+
+        {/* ── Modal de reprogrammation ── */}
+        {rescheduleId &&
+          (() => {
+            const appt = appointments.find((a) => a.id === rescheduleId);
+            if (!appt) return null;
+            return (
+              <RescheduleModal
+                appointment={appt}
+                rescheduling={rescheduling}
+                error={rescheduleError}
+                onConfirm={handleReschedule}
+                onClose={() => {
+                  setRescheduleId(null);
+                  setRescheduleError("");
+                }}
+              />
+            );
+          })()}
+
+        {/* ── Modal d'avis ── */}
+        {reviewAppt && (
+          <ReviewModal
+            appointment={reviewAppt}
+            submitting={submittingReview}
+            error={reviewError}
+            onConfirm={handleSubmitReview}
+            onClose={() => {
+              setReviewAppt(null);
+              setReviewError("");
+            }}
           />
         )}
       </main>

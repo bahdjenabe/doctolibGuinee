@@ -62,18 +62,38 @@ export default function DashboardHeader({ userName, userId, onLogout }: Props) {
             Trouver un médecin
           </button>
 
+          {/* Accès rapides : messagerie + documents */}
+          <button
+            onClick={() => router.push("/messages")}
+            title="Messagerie"
+            className="w-[38px] h-[38px] rounded-xl border border-gray-200 hover:bg-gray-50 flex items-center justify-center text-base transition-colors"
+          >
+            💬
+          </button>
+          <button
+            onClick={() => router.push("/documents")}
+            title="Mes documents"
+            className="w-[38px] h-[38px] rounded-xl border border-gray-200 hover:bg-gray-50 flex items-center justify-center text-base transition-colors"
+          >
+            📄
+          </button>
+
           {/* Cloche de notification */}
           <Notification userId={userId} />
 
-          {/* Avatar + nom */}
-          <div className="flex items-center gap-2">
+          {/* Avatar + nom → Mon compte */}
+          <button
+            onClick={() => router.push("/account")}
+            title="Mon compte"
+            className="flex items-center gap-2 rounded-xl px-1.5 py-1 hover:bg-gray-50 transition-colors"
+          >
             <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold">
               {userName?.charAt(0).toUpperCase() || "P"}
             </div>
             <span className="hidden sm:block text-sm font-medium text-gray-700">
               {userName}
             </span>
-          </div>
+          </button>
 
           {/* Bouton déconnexion */}
           <button

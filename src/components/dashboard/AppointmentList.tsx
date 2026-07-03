@@ -16,6 +16,9 @@ type Props = {
   loading: boolean; // chargement Firestore
   onFilter: (f: Filter) => void;
   onCancel: (id: string) => void;
+  onReschedule: (id: string) => void;
+  reviewedIds: Set<string>; // IDs des RDV déjà notés
+  onReview: (appt: Appointment) => void;
 };
 
 // Labels des onglets
@@ -31,6 +34,9 @@ export default function AppointmentList({
   loading,
   onFilter,
   onCancel,
+  onReschedule,
+  reviewedIds,
+  onReview,
 }: Props) {
   const router = useRouter();
 
@@ -110,6 +116,9 @@ export default function AppointmentList({
               key={appt.id}
               appointment={appt}
               onCancel={onCancel}
+              onReschedule={onReschedule}
+              reviewed={reviewedIds.has(appt.id)}
+              onReview={onReview}
             />
           ))}
         </div>

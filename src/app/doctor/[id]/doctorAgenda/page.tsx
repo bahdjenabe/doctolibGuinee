@@ -21,7 +21,7 @@
 // ============================================================
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   collection,
   query,
@@ -38,8 +38,11 @@ import { db } from "@/lib/firebase";
 import { Appointment, Doctor, AgendaFilter } from "@/types/agenda";
 import { isUpcoming, isToday, parseDate } from "@/lib/agenda";
 
-// Notification au patient quand le médecin annule
-import { notifyPatientOfCancellation } from "@/hooks/useNotifications";
+// Notifications au patient (annulation / confirmation)
+import {
+  notifyPatientOfCancellation,
+  notifyPatientOfConfirmation,
+} from "@/hooks/useNotifications";
 
 // Composants
 import AgendaHeader from "@/components/agenda/AgendaHeader";
@@ -47,7 +50,7 @@ import AgendaStats from "@/components/agenda/AgendaStats";
 import AgendaList from "@/components/agenda/AgendaList";
 import CancelReasonModal from "@/components/agenda/CancelReasonModal";
 import AgendaToast from "@/components/agenda/AgendaToast";
-import ProtectedRoute from "@/components/ProtectedRoute";
+import DoctorRoute from "@/components/DoctorRoute";
 
 // ============================================================
 // COMPOSANT
@@ -56,12 +59,25 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 export default function DoctorAgendaPage() {
   const { id } = useParams(); // ID du médecin dans l'URL
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Onglet initial : depuis ?filter=... si valide, sinon "today".
+  const VALID_FILTERS: AgendaFilter[] = [
+    "pending",
+    "today",
+    "upcoming",
+    "past",
+    "cancelled",
+  ];
+  const filterParam = searchParams.get("filter") as AgendaFilter | null;
+  const initialFilter: AgendaFilter =
+    filterParam && VALID_FILTERS.includes(filterParam) ? filterParam : "today";
 
   // ── States ──
   const [doctor, setDoctor] = useState<Doctor | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<AgendaFilter>("today");
+  const [filter, setFilter] = useState<AgendaFilter>(initialFilter);
 
   // Modal d'annulation
   const [cancelAppt, setCancelAppt] = useState<Appointment | null>(null); // RDV à annuler
@@ -159,9 +175,37 @@ export default function DoctorAgendaPage() {
     }
   };
 
+  // ── Confirmation d'une demande de RDV par le médecin ──
+  const handleConfirm = async (appt: Appointment) => {
+    try {
+      // 1. Passe le RDV de "pending" à "confirmed"
+      await updateDoc(doc(db, "appointments", appt.id), {
+        status: "confirmed",
+        confirmedAt: serverTimestamp(),
+      });
+
+      // 2. Notifie le patient que son RDV est validé
+      if (appt.patientId) {
+        await notifyPatientOfConfirmation({
+          patientId: appt.patientId,
+          appointmentId: appt.id,
+          patientName: appt.patientName,
+          doctorName: doctor?.name || appt.doctorName,
+          date: appt.date,
+        });
+      }
+
+      showToast(`RDV de ${appt.patientName} confirmé.`);
+    } catch (err) {
+      console.error("Erreur confirmation:", err);
+    }
+  };
+
   // ── Filtrage des appointments selon l'onglet actif ──
   const getFiltered = (): Appointment[] => {
     switch (filter) {
+      case "pending":
+        return appointments.filter((a) => a.status === "pending");
       case "today":
         return appointments.filter(
           (a) => a.status === "confirmed" && isToday(a.date),
@@ -183,6 +227,9 @@ export default function DoctorAgendaPage() {
   };
 
   // ── Calcul des compteurs pour les stats ──
+  const pendingCount = appointments.filter(
+    (a) => a.status === "pending",
+  ).length;
   const todayCount = appointments.filter(
     (a) => a.status === "confirmed" && isToday(a.date),
   ).length;
@@ -199,11 +246,11 @@ export default function DoctorAgendaPage() {
   // ── Loading ──
   if (!doctor && loading) {
     return (
-      <ProtectedRoute>
+      <DoctorRoute doctorId={id as string}>
         <main className="min-h-screen flex items-center justify-center bg-gray-50">
           <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
         </main>
-      </ProtectedRoute>
+      </DoctorRoute>
     );
   }
 
@@ -211,7 +258,7 @@ export default function DoctorAgendaPage() {
   // RENDER
   // ============================================================
   return (
-    <ProtectedRoute>
+    <DoctorRoute doctorId={id as string}>
       <main className="min-h-screen bg-gray-50">
         {/* ── Toast de succès en haut ── */}
         <AgendaToast message={toast.message} visible={toast.visible} />
@@ -228,6 +275,7 @@ export default function DoctorAgendaPage() {
         <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
           {/* ── Cartes stats ── */}
           <AgendaStats
+            pendingCount={pendingCount}
             todayCount={todayCount}
             upcomingCount={upcomingCount}
             pastCount={pastCount}
@@ -243,6 +291,7 @@ export default function DoctorAgendaPage() {
             loading={loading}
             onFilter={setFilter}
             onCancel={setCancelAppt}
+            onConfirm={handleConfirm}
           />
         </div>
 
@@ -256,6 +305,6 @@ export default function DoctorAgendaPage() {
           />
         )}
       </main>
-    </ProtectedRoute>
+    </DoctorRoute>
   );
 }

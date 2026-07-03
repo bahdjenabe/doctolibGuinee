@@ -1,0 +1,231 @@
+rules_version = '2';
+
+// ============================================================
+// RÈGLES DE SÉCURITÉ FIRESTORE — doctolibguinee
+// ============================================================
+//
+// Modèle :
+//   - patients/{uid}   : 1 doc par patient (uid = UID Auth)
+//   - doctors/{uid}    : 1 doc par médecin  (id = UID Auth du médecin,
+//                        voir convention : doctorId des RDV/notifs = UID Auth)
+//   - appointments/{id}: RDV (patientId + doctorId = UID Auth)
+//   - reviews/{id}     : avis patient -> médecin
+//   - notifications/{id}: notif destinée à un recipientId (UID Auth)
+//
+// ⚠️ Ces règles s'exécutent côté serveur Firestore : elles sont la
+//    VRAIE sécurité (les gardes React ne protègent que l'UI).
+//    Le SDK Admin (console, Cloud Functions) ignore ces règles.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Vrai si la mise à jour ne touche QUE les champs listés.
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(keys);
+    }
+
+    // ════════════════════════════════════════════════════════
+    // DOCTORS
+    // ════════════════════════════════════════════════════════
+    match /doctors/{doctorId} {
+      // Lecture publique : recherche + fiche médecin sans connexion.
+      allow read: if true;
+
+      // Mise à jour autorisée si :
+      //   - c'est le médecin propriétaire (profil, horaires…), OU
+      //   - un utilisateur connecté met à jour UNIQUEMENT l'agrégat
+      //     d'avis (note moyenne + nombre), via recomputeDoctorRating.
+      allow update: if (isSignedIn() && request.auth.uid == doctorId)
+        || (isSignedIn() && onlyChanges(['rating', 'reviews']));
+
+      // Création / suppression : réservées à l'admin (console / SDK Admin).
+      allow create, delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════
+    // APPOINTMENTS
+    // ════════════════════════════════════════════════════════
+    match /appointments/{appointmentId} {
+      // ⚠️ LECTURE PUBLIQUE — choix lié à l'architecture actuelle :
+      // la recherche (/search) et la fiche médecin (/doctor/[id]) lisent
+      // les RDV SANS connexion pour afficher les créneaux déjà pris.
+      // Conséquence : les champs du RDV (dont patientName) sont visibles
+      // par tout visiteur. Pour fermer cela, voir la note "vie privée"
+      // (il faut alors restreindre la lecture aux participants et calculer
+      // les disponibilités autrement).
+      allow read: if true;
+
+      // Le patient crée SON propre rendez-vous.
+      allow create: if isSignedIn()
+        && request.resource.data.patientId == request.auth.uid;
+
+      // Mise à jour autorisée au patient propriétaire OU au médecin concerné
+      // (annulation, reprogrammation, drapeaux de rappel).
+      // patientId et doctorId sont immuables.
+      allow update: if isSignedIn()
+        && (resource.data.patientId == request.auth.uid
+            || resource.data.doctorId == request.auth.uid)
+        && request.resource.data.patientId == resource.data.patientId
+        && request.resource.data.doctorId == resource.data.doctorId;
+
+      // Pas de suppression dure : une annulation = passage du status à
+      // "cancelled" (géré par les règles d'update ci-dessus).
+      allow delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════
+    // REVIEWS
+    // ════════════════════════════════════════════════════════
+    match /reviews/{reviewId} {
+      // Lecture publique (avis affichés sur la fiche médecin).
+      allow read: if true;
+
+      // Un patient connecté crée son propre avis.
+      allow create: if isSignedIn()
+        && request.resource.data.patientId == request.auth.uid;
+
+      // Un avis est immuable côté client.
+      allow update, delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════
+    // NOTIFICATIONS
+    // ════════════════════════════════════════════════════════
+    match /notifications/{notifId} {
+      // Seul le destinataire lit ses notifications.
+      allow read: if isSignedIn()
+        && resource.data.recipientId == request.auth.uid;
+
+      // Tout utilisateur connecté peut créer une notification
+      // (patient -> médecin, médecin -> patient, rappels auto).
+      allow create: if isSignedIn();
+
+      // Le destinataire peut seulement marquer la notif comme lue.
+      allow update: if isSignedIn()
+        && resource.data.recipientId == request.auth.uid
+        && onlyChanges(['read']);
+
+      allow delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════
+    // PATIENTS
+    // ════════════════════════════════════════════════════════
+    match /patients/{patientId} {
+      // Chacun ne lit/écrit que sa propre fiche.
+      // ⚠️ La page /admin/users (liste de TOUS les patients) ne
+      //    fonctionnera plus sans un rôle "admin" (custom claim).
+      allow read, create, update: if isSignedIn()
+        && request.auth.uid == patientId;
+      allow delete: if false;
+
+      // Proches / bénéficiaires rattachés au compte du patient
+      // (enfants, parents...). Gérés uniquement par le titulaire.
+      match /beneficiaries/{beneficiaryId} {
+        allow read, write: if isSignedIn() && request.auth.uid == patientId;
+      }
+    }
+
+    // ════════════════════════════════════════════════════════
+    // CONSULTATIONS (téléconsultation vidéo)
+    // Le doc porte l'ID du rendez-vous. Contient la présence des
+    // participants + les données de signalisation WebRTC (offer/
+    // answer) et les candidats ICE en sous-collections.
+    // participantIds = [patientId, doctorId] (UID Auth).
+    // ════════════════════════════════════════════════════════
+    match /consultations/{consultationId} {
+      allow read: if isSignedIn()
+        && request.auth.uid in resource.data.participantIds;
+
+      // Le premier participant qui rejoint crée le doc de salle.
+      allow create: if isSignedIn()
+        && request.auth.uid in request.resource.data.participantIds;
+
+      allow update: if isSignedIn()
+        && request.auth.uid in resource.data.participantIds;
+
+      allow delete: if false;
+
+      // Candidats ICE — un participant écrit les siens, l'autre les lit.
+      match /callerCandidates/{cand} {
+        allow read, create: if isSignedIn();
+      }
+      match /calleeCandidates/{cand} {
+        allow read, create: if isSignedIn();
+      }
+    }
+
+    // ════════════════════════════════════════════════════════
+    // CONVERSATIONS + MESSAGES (messagerie sécurisée)
+    // participants = [patientId, doctorId] (UID Auth).
+    // ════════════════════════════════════════════════════════
+    match /conversations/{conversationId} {
+      allow read: if isSignedIn()
+        && request.auth.uid in resource.data.participants;
+
+      allow create: if isSignedIn()
+        && request.auth.uid in request.resource.data.participants;
+
+      // Mise à jour du récap (dernier message, non-lus) par un participant.
+      allow update: if isSignedIn()
+        && request.auth.uid in resource.data.participants;
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        // Seuls les participants de la conversation parente y accèdent.
+        function convParticipants() {
+          return get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        }
+        allow read: if isSignedIn() && request.auth.uid in convParticipants();
+        allow create: if isSignedIn()
+          && request.auth.uid in convParticipants()
+          && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // ════════════════════════════════════════════════════════
+    // PRESCRIPTIONS (ordonnances)
+    // Le médecin rédige, le patient consulte. Immuables une fois créées.
+    // ════════════════════════════════════════════════════════
+    match /prescriptions/{prescriptionId} {
+      allow read: if isSignedIn()
+        && (resource.data.patientId == request.auth.uid
+            || resource.data.doctorId == request.auth.uid);
+
+      // Seul le médecin émetteur peut créer une ordonnance.
+      allow create: if isSignedIn()
+        && request.resource.data.doctorId == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════
+    // DOCUMENTS (métadonnées ; le fichier est dans Storage)
+    // Un document appartient à un patient. Le patient gère les siens ;
+    // un médecin peut en déposer pour un patient (compte-rendu...).
+    // ════════════════════════════════════════════════════════
+    match /documents/{documentId} {
+      allow read: if isSignedIn()
+        && (resource.data.patientId == request.auth.uid
+            || resource.data.ownerId == request.auth.uid);
+
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid;
+
+      // Le propriétaire (celui qui a déposé) peut supprimer son document.
+      allow delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+
+      allow update: if false;
+    }
+  }
+}

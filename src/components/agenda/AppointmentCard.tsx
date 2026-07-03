@@ -21,12 +21,17 @@ type AppointmentWithPayment = Appointment & {
 type Props = {
   appointment: AppointmentWithPayment;
   onCancel: (appt: AppointmentWithPayment) => void;
+  onConfirm: (appt: AppointmentWithPayment) => void;
 };
 
 export default function AgendaAppointmentCard({
   appointment: appt,
   onCancel,
+  onConfirm,
 }: Props) {
+  // Demande en attente de validation par le médecin
+  const isPending = appt.status === "pending";
+
   // Annulation possible seulement si RDV confirmé et futur
   const canCancel = appt.status === "confirmed" && isUpcoming(appt.date);
 
@@ -34,6 +39,8 @@ export default function AgendaAppointmentCard({
   const getBadge = () => {
     if (appt.status === "cancelled")
       return { label: "Annulé", className: "bg-red-50 text-red-500" };
+    if (isPending)
+      return { label: "En attente", className: "bg-amber-100 text-amber-700" };
     if (isToday(appt.date))
       return { label: "Aujourd'hui", className: "bg-amber-50 text-amber-700" };
     if (isUpcoming(appt.date))
@@ -106,6 +113,46 @@ export default function AgendaAppointmentCard({
                   <strong>Annulé par le patient</strong>
                 )}
               </span>
+            </div>
+          )}
+
+          {/* Demande en attente → Confirmer / Refuser */}
+          {isPending && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => onConfirm(appt)}
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                Confirmer
+              </button>
+              <button
+                onClick={() => onCancel(appt)}
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="15" y1="9" x2="9" y2="15" />
+                  <line x1="9" y1="9" x2="15" y2="15" />
+                </svg>
+                Refuser
+              </button>
             </div>
           )}
 

@@ -209,6 +209,119 @@ export async function notifyDoctorOfCancellation({
 }
 
 // ============================================================
+// FONCTION — notifyDoctorOfNewRequest
+// Appelée quand un PATIENT réserve → notifie le MÉDECIN qu'une
+// nouvelle demande de RDV est EN ATTENTE de sa validation.
+// ============================================================
+
+export async function notifyDoctorOfNewRequest({
+  doctorId,
+  appointmentId,
+  patientName,
+  doctorName,
+  date,
+}: {
+  doctorId:      string;
+  appointmentId: string;
+  patientName:   string;
+  doctorName:    string;
+  date:          string;
+}) {
+  try {
+    await addDoc(collection(db, "notifications"), {
+      recipientId:   doctorId,       // UID Auth du médecin
+      recipientRole: "doctor",
+      type:          "appointment_requested",
+      message:       `${patientName} souhaite réserver un rendez-vous le ${formatDateShort(date)}. À confirmer.`,
+      appointmentId,
+      doctorName,
+      patientName,
+      date,
+      read:          false,
+      createdAt:     serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("[Notifications] Erreur création notif demande RDV:", err);
+  }
+}
+
+// ============================================================
+// FONCTION — notifyPatientOfConfirmation
+// Appelée quand un MÉDECIN confirme une demande → notifie le PATIENT
+// que son rendez-vous est validé.
+// ============================================================
+
+export async function notifyPatientOfConfirmation({
+  patientId,
+  appointmentId,
+  patientName,
+  doctorName,
+  date,
+}: {
+  patientId:     string;
+  appointmentId: string;
+  patientName:   string;
+  doctorName:    string;
+  date:          string;
+}) {
+  try {
+    await addDoc(collection(db, "notifications"), {
+      recipientId:   patientId,      // UID Auth du patient
+      recipientRole: "patient",
+      type:          "appointment_confirmed",
+      message:       `✅ ${doctorName} a confirmé votre rendez-vous du ${formatDateShort(date)}.`,
+      appointmentId,
+      doctorName,
+      patientName,
+      date,
+      read:          false,
+      createdAt:     serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("[Notifications] Erreur création notif confirmation:", err);
+  }
+}
+
+// ============================================================
+// FONCTION — notifyDoctorOfReschedule
+// Appelée quand un PATIENT reprogramme → notifie le MÉDECIN
+// avec l'ancien et le nouveau créneau.
+// ============================================================
+
+export async function notifyDoctorOfReschedule({
+  doctorId,
+  appointmentId,
+  patientName,
+  doctorName,
+  oldDate,
+  newDate,
+}: {
+  doctorId:      string;
+  appointmentId: string;
+  patientName:   string;
+  doctorName:    string;
+  oldDate:       string;
+  newDate:       string;
+}) {
+  try {
+    await addDoc(collection(db, "notifications"), {
+      recipientId:   doctorId,       // UID Auth du médecin
+      recipientRole: "doctor",
+      type:          "appointment_rescheduled_by_patient",
+      message:       `${patientName} a reprogrammé son rendez-vous du ${formatDateShort(oldDate)} au ${formatDateShort(newDate)}.`,
+      appointmentId,
+      doctorName,
+      patientName,
+      date:          newDate,
+      read:          false,
+      createdAt:     serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("[Notifications] Erreur création notif reprogrammation:", err);
+  }
+}
+
+// ============================================================
 // FONCTION — notifyPatientOfCancellation
 // Appelée quand un MÉDECIN annule → notifie le PATIENT
 //

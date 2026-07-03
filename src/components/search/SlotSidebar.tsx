@@ -56,6 +56,12 @@ export default function SlotSidebar({
   const allSlots = getSlotsForDate();
   const totalAvail = allSlots.filter((s) => !bookedSet.has(s)).length;
 
+  // Le médecin consulte-t-il ce jour-là ? (plages horaires définies)
+  const dayRanges = doctor.workingHours?.[getDayName(selectedDate)] || [];
+  // Aucun créneau affiché alors qu'il y a des plages = tout est déjà passé
+  // (ne peut arriver qu'aujourd'hui, vu l'exclusion des créneaux passés).
+  const allSlotsPast = dayRanges.length > 0 && allSlots.length === 0;
+
   return (
     <aside className="bg-white rounded-3xl border border-gray-100 p-5 shadow-sm sticky top-24 space-y-4">
       {/* ── En-tête médecin ── */}
@@ -122,7 +128,9 @@ export default function SlotSidebar({
       {/* Message si le jour n'a pas de créneaux */}
       {selectedDate && allSlots.length === 0 && (
         <p className="text-sm text-gray-400 text-center py-3">
-          Pas de consultation ce jour
+          {allSlotsPast
+            ? "Plus de créneaux disponibles aujourd'hui"
+            : "Pas de consultation ce jour"}
         </p>
       )}
 

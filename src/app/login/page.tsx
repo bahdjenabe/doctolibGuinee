@@ -15,7 +15,7 @@
 //   Tout est dans ce fichier (page simple, pas besoin de découper)
 // ============================================================
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
@@ -41,14 +41,14 @@ const translateError = (code: string): string => {
 // ============================================================
 // COMPOSANT
 // ============================================================
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { login, user, loading: authLoading } = useAuth();
 
   // URL vers laquelle rediriger après connexion
   // Ex: /doctor/abc123?date=1713430800000
-  const redirectTo = searchParams.get("redirect") || "/search";
+  const redirectTo = searchParams.get("redirect") || "/dashboard";
 
   // ── States ──
   const [email, setEmail] = useState("");
@@ -349,5 +349,17 @@ export default function LoginPage() {
         </div>
       </main>
     </GuestRoute>
+  );
+}
+
+// ============================================================
+// EXPORT — Suspense requis par Next.js car useSearchParams()
+// est utilisé dans un composant client prérendu statiquement
+// ============================================================
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginContent />
+    </Suspense>
   );
 }

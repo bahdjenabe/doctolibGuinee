@@ -41,12 +41,16 @@ const timeAgo = (timestamp: any): string => {
 const getNotifIcon = (type: string): string => {
   if (type === "appointment_cancelled_by_patient") return "👤";
   if (type === "appointment_cancelled_by_doctor") return "🏥";
+  if (type === "appointment_rescheduled_by_patient") return "📅";
+  if (type === "appointment_reminder") return "⏰";
   return "🔔";
 };
 
 const getNotifColor = (type: string): string => {
   if (type === "appointment_cancelled_by_doctor") return "#fef2f2";
   if (type === "appointment_cancelled_by_patient") return "#fff7ed";
+  if (type === "appointment_rescheduled_by_patient") return "#eff6ff";
+  if (type === "appointment_reminder") return "#fffbeb";
   return "#f0f7ff";
 };
 

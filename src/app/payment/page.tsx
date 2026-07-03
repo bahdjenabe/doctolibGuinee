@@ -46,6 +46,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/AuthContext";
+import { notifyDoctorOfNewRequest } from "@/hooks/useNotifications";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 // Composants
@@ -86,6 +87,8 @@ function PaymentContent() {
   const specialty = searchParams.get("specialty") || "";
   const city = searchParams.get("city") || "";
   const amount = Number(searchParams.get("amount")) || 150000; // 150 000 GNF par défaut
+  // Mode de consultation : "video" (téléconsultation) ou "cabinet" (présentiel)
+  const consultType = searchParams.get("type") === "video" ? "video" : "cabinet";
 
   // ── States ──
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(
@@ -110,6 +113,15 @@ function PaymentContent() {
     setError("");
 
     try {
+      // ── Étape 0 : Refuser un créneau déjà passé ──
+      if (Number(date) < Date.now()) {
+        setError(
+          "❌ Ce créneau est déjà passé. Veuillez choisir un autre créneau.",
+        );
+        setPaying(false);
+        return;
+      }
+
       // ── Étape 1 : Simulation du paiement (2 secondes) ──
       // En production : remplacer par l'appel API Orange Money / Wave / Stripe
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -119,11 +131,13 @@ function PaymentContent() {
       const pad = (n: number) => String(n).padStart(2, "0");
       const dateString = `${slotDate.getFullYear()}-${pad(slotDate.getMonth() + 1)}-${pad(slotDate.getDate())}T${pad(slotDate.getHours())}:${pad(slotDate.getMinutes())}:00.000`;
 
+      // Un créneau est occupé s'il existe un RDV confirmé OU en attente
+      // de validation (pending) à cette date chez ce médecin.
       const q = query(
         collection(db, "appointments"),
         where("doctorId", "==", doctorId),
         where("date", "==", dateString),
-        where("status", "==", "confirmed"),
+        where("status", "in", ["confirmed", "pending"]),
       );
       const snap = await getDocs(q);
 
@@ -142,19 +156,23 @@ function PaymentContent() {
 
       // ── Étape 4 : Écriture du RDV dans Firestore ──
       // On ajoute les champs de paiement : paid, paymentRef, paymentMethod
-      await addDoc(collection(db, "appointments"), {
+      const patientName = user.displayName || user.email || "Patient";
+      const apptRef = await addDoc(collection(db, "appointments"), {
         doctorId: doctorId,
         doctorName: doctorName,
         specialty: specialty,
         city: city,
         date: dateString,
 
+        // Mode de consultation (présentiel ou téléconsultation vidéo)
+        type: consultType,
+
         // Infos patient
         patientId: user.uid,
-        patientName: user.displayName || user.email || "Patient",
+        patientName,
 
-        // Statut RDV
-        status: "confirmed",
+        // Statut RDV — en attente de validation par le médecin
+        status: "pending",
 
         // ── Informations de paiement ──
         paid: true, // RDV payé
@@ -164,6 +182,15 @@ function PaymentContent() {
         paymentMode: "simulation", // à changer en "production" plus tard
 
         createdAt: serverTimestamp(),
+      });
+
+      // ── Étape 4 bis : Notifie le médecin de la nouvelle demande ──
+      await notifyDoctorOfNewRequest({
+        doctorId,
+        appointmentId: apptRef.id,
+        patientName,
+        doctorName,
+        date: dateString,
       });
 
       // ── Étape 5 : Affiche l'écran de succès ──

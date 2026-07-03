@@ -14,10 +14,14 @@ const DAY_NAMES_EN = [
 // ──────────────────────────────────────────
 // generateSlots
 // Génère tous les créneaux de 30 min pour une date donnée
-// depuis les plages horaires Firestore (ex: ["08:00-12:00"])
+// depuis les plages horaires Firestore (ex: ["08:00-12:00"]).
+// Les créneaux déjà passés (heure actuelle) sont exclus : on ne
+// peut jamais réserver un créneau dans le passé. Sans effet sur
+// les jours futurs, tous leurs créneaux étant à venir.
 // ──────────────────────────────────────────
 export function generateSlots(dateStr: string, ranges: string[]): number[] {
   const slots: number[] = [];
+  const now = Date.now();
 
   const valid = (ranges || []).filter(
     (r) => typeof r === "string" && r.includes("-") && r.trim() !== ""
@@ -40,7 +44,8 @@ export function generateSlots(dateStr: string, ranges: string[]): number[] {
 
     let cur = base.getTime();
     while (cur + SLOT_DURATION * 60000 <= endMs.getTime()) {
-      slots.push(cur);
+      // On ignore les créneaux dont l'heure de début est déjà passée
+      if (cur >= now) slots.push(cur);
       cur += SLOT_DURATION * 60000;
     }
   }

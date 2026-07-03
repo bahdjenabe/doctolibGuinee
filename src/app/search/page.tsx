@@ -17,19 +17,24 @@
 //   - onSnapshot("appointments") → créneaux pris en temps réel
 // ============================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 import { Doctor } from "@/types/doctor";
-import { cleanWorkingHours, normalizeTime } from "@/lib/slots";
+import {
+  cleanWorkingHours,
+  normalizeTime,
+  countAvailable,
+} from "@/lib/slots";
 
 import SearchBar from "@/components/search/SearchBar";
+import SearchFilters from "@/components/search/SearchFilters";
 import DoctorList from "@/components/search/DoctorList";
 import SlotSidebar from "@/components/search/SlotSidebar";
 
-export default function SearchPage() {
+function SearchContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -47,6 +52,11 @@ export default function SearchPage() {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
+
+  // Filtres
+  const [specialtyFilter, setSpecialtyFilter] = useState("");
+  const [cityFilter, setCityFilter] = useState("");
+  const [onlyAvailableToday, setOnlyAvailableToday] = useState(false);
 
   // ──────────────────────────────────────────
   // ÉCOUTE TEMPS RÉEL DES DOCTORS
@@ -77,19 +87,63 @@ export default function SearchPage() {
   }, []);
 
   // ──────────────────────────────────────────
-  // FILTRES — réagit au champ de recherche
+  // FILTRES — texte + spécialité + ville + disponibilité du jour
+  // Réagit aussi aux appointments (temps réel) pour la dispo du jour.
   // ──────────────────────────────────────────
   useEffect(() => {
-    const results = searchInput
-      ? doctors.filter(
-          (d) =>
-            d.name.toLowerCase().includes(searchInput.toLowerCase()) ||
-            d.specialty.toLowerCase().includes(searchInput.toLowerCase()),
-        )
-      : doctors;
+    const term = searchInput.toLowerCase();
+    const todayStr = new Date().toISOString().split("T")[0];
+
+    // Disponibilité du jour pour un médecin donné
+    const isAvailableToday = (d: Doctor): boolean => {
+      const booked = new Set<number>(
+        appointments
+          .filter((a) => a.doctorId === d.id && a.status !== "cancelled")
+          .map((a) => normalizeTime(a.date))
+          .filter((t): t is number => t !== null),
+      );
+      return countAvailable(todayStr, d.workingHours || {}, booked) > 0;
+    };
+
+    const results = doctors.filter((d) => {
+      const matchesText =
+        !term ||
+        d.name.toLowerCase().includes(term) ||
+        d.specialty.toLowerCase().includes(term);
+      const matchesSpecialty = !specialtyFilter || d.specialty === specialtyFilter;
+      const matchesCity = !cityFilter || d.city === cityFilter;
+      const matchesAvailability = !onlyAvailableToday || isAvailableToday(d);
+
+      return matchesText && matchesSpecialty && matchesCity && matchesAvailability;
+    });
 
     setFilteredDoctors(results);
-  }, [searchInput, doctors]);
+  }, [
+    searchInput,
+    doctors,
+    specialtyFilter,
+    cityFilter,
+    onlyAvailableToday,
+    appointments,
+  ]);
+
+  // ──────────────────────────────────────────
+  // Listes uniques pour les menus déroulants de filtres
+  // ──────────────────────────────────────────
+  const specialties = Array.from(
+    new Set(doctors.map((d) => d.specialty).filter(Boolean)),
+  ).sort();
+
+  const cities = Array.from(
+    new Set(doctors.map((d) => d.city).filter(Boolean)),
+  ).sort();
+
+  // Réinitialise tous les filtres
+  const resetFilters = () => {
+    setSpecialtyFilter("");
+    setCityFilter("");
+    setOnlyAvailableToday(false);
+  };
 
   // ──────────────────────────────────────────
 
@@ -210,6 +264,19 @@ export default function SearchPage() {
       {/* ── Barre de recherche sticky ── */}
       <SearchBar value={searchInput} onChange={setSearchInput} />
 
+      {/* ── Barre de filtres ── */}
+      <SearchFilters
+        specialties={specialties}
+        cities={cities}
+        specialty={specialtyFilter}
+        city={cityFilter}
+        onlyAvailableToday={onlyAvailableToday}
+        onSpecialtyChange={setSpecialtyFilter}
+        onCityChange={setCityFilter}
+        onAvailableTodayChange={setOnlyAvailableToday}
+        onReset={resetFilters}
+      />
+
       {/* ── Corps de la page ── */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6 p-6">
         {/* ── Liste des médecins (3/4 de la largeur) ── */}
@@ -230,5 +297,17 @@ export default function SearchPage() {
         />
       </div>
     </main>
+  );
+}
+
+// ============================================================
+// EXPORT — Suspense requis par Next.js car useSearchParams()
+// est utilisé dans un composant client prérendu statiquement
+// ============================================================
+export default function SearchPage() {
+  return (
+    <Suspense>
+      <SearchContent />
+    </Suspense>
   );
 }

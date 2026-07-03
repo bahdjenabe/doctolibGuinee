@@ -14,10 +14,12 @@ type Props = {
   loading: boolean;
   onFilter: (f: AgendaFilter) => void;
   onCancel: (appt: Appointment) => void;
+  onConfirm: (appt: Appointment) => void;
 };
 
 // Onglets disponibles
 const FILTERS: { key: AgendaFilter; label: string }[] = [
+  { key: "pending", label: "À valider" },
   { key: "today", label: "Auj." },
   { key: "upcoming", label: "À venir" },
   { key: "past", label: "Passés" },
@@ -26,6 +28,7 @@ const FILTERS: { key: AgendaFilter; label: string }[] = [
 
 // Icône et message selon le filtre actif
 const EMPTY_STATE: Record<AgendaFilter, { emoji: string; message: string }> = {
+  pending: { emoji: "⏳", message: "Aucune demande à valider" },
   today: { emoji: "📅", message: "Aucun RDV aujourd'hui" },
   upcoming: { emoji: "🗓️", message: "Aucun RDV à venir" },
   past: { emoji: "✅", message: "Aucun RDV passé" },
@@ -38,6 +41,7 @@ export default function AgendaList({
   loading,
   onFilter,
   onCancel,
+  onConfirm,
 }: Props) {
   return (
     <div>
@@ -101,6 +105,7 @@ export default function AgendaList({
               key={appt.id}
               appointment={appt}
               onCancel={onCancel}
+              onConfirm={onConfirm}
             />
           ))}
         </div>

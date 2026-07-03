@@ -68,6 +68,15 @@ export default function DoctorDashboardHeader({
             Mon agenda
           </button>
 
+          {/* Messagerie */}
+          <button
+            onClick={() => router.push("/messages")}
+            title="Messagerie"
+            className="w-[38px] h-[38px] rounded-xl border border-gray-200 hover:bg-gray-50 flex items-center justify-center text-base transition-colors"
+          >
+            💬
+          </button>
+
           {/* Cloche de notification
               Le médecin reçoit les annulations des patients ici */}
           <NotificationBell userId={doctorId} />

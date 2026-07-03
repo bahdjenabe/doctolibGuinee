@@ -25,7 +25,12 @@ export type Doctor = {
 };
 
 // Filtre actif sur la liste des RDV
-export type AgendaFilter = "today" | "upcoming" | "past" | "cancelled";
+export type AgendaFilter =
+  | "pending"
+  | "today"
+  | "upcoming"
+  | "past"
+  | "cancelled";
 
 // Raisons prédéfinies d'annulation par le médecin
 export const CANCEL_REASONS = [

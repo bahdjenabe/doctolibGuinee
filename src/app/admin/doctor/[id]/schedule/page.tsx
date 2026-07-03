@@ -30,7 +30,7 @@ import { WorkingHours, DAYS } from "@/types/schedule";
 import ScheduleHeader from "@/components/schedule/ScheduleHeader";
 import DayCard from "@/components/schedule/DayCard";
 import ScheduleToast from "@/components/schedule/ScheduleToast";
-import ProtectedRoute from "@/components/ProtectedRoute";
+import DoctorRoute from "@/components/DoctorRoute";
 
 // ============================================================
 // COMPOSANT
@@ -160,7 +160,7 @@ export default function SchedulePage() {
   // RENDER
   // ============================================================
   return (
-    <ProtectedRoute>
+    <DoctorRoute doctorId={id as string}>
       <main className="min-h-screen bg-gray-50">
         {/* ── Toast en haut ── */}
         <ScheduleToast
@@ -212,6 +212,6 @@ export default function SchedulePage() {
           </p>
         </div>
       </main>
-    </ProtectedRoute>
+    </DoctorRoute>
   );
 }
