@@ -15,8 +15,9 @@
 // ============================================================
 
 import { useEffect, useMemo, useState } from "react";
-import { doc, getDoc, collection, onSnapshot, query, where } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { listenDoctorBookedSlots } from "@/lib/bookedSlots";
 import { Doctor } from "@/types/doctor";
 import { Appointment } from "@/types/appointment";
 import {
@@ -47,7 +48,7 @@ export default function RescheduleModal({
 }: Props) {
   const [doctor, setDoctor] = useState<Doctor | null>(null);
   const [loadingDoctor, setLoadingDoctor] = useState(true);
-  const [appointments, setAppointments] = useState<any[]>([]);
+  const [bookedTimes, setBookedTimes] = useState<Set<number>>(new Set());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
 
@@ -78,32 +79,22 @@ export default function RescheduleModal({
     fetchDoctor();
   }, [appointment]);
 
-  // ── Écoute les RDV du médecin (créneaux pris) ──
+  // ── Écoute les créneaux pris du médecin (collection publique) ──
   useEffect(() => {
-    const q = query(
-      collection(db, "appointments"),
-      where("doctorId", "==", appointment.doctorId),
+    const unsub = listenDoctorBookedSlots(
+      appointment.doctorId,
+      setBookedTimes,
     );
-    const unsub = onSnapshot(q, (snap) => {
-      setAppointments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
     return () => unsub();
   }, [appointment.doctorId]);
 
-  // ── Créneaux pris (hors annulés et hors le RDV en cours de repro) ──
-  const bookedSet = useMemo(
-    () =>
-      new Set<number>(
-        appointments
-          .filter(
-            (a) =>
-              a.status !== "cancelled" && a.id !== appointment.id,
-          )
-          .map((a) => normalizeTime(a.date))
-          .filter((t): t is number => t !== null),
-      ),
-    [appointments, appointment.id],
-  );
+  // ── Créneaux pris (hors celui du RDV en cours de reprogrammation) ──
+  const bookedSet = useMemo(() => {
+    const set = new Set(bookedTimes);
+    const ownTime = normalizeTime(appointment.date);
+    if (ownTime !== null) set.delete(ownTime);
+    return set;
+  }, [bookedTimes, appointment.date]);
 
   // ── Créneaux du jour sélectionné ──
   const daySlots = useMemo(() => {

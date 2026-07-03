@@ -36,16 +36,10 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  addDoc,
-  collection,
-  getDocs,
-  query,
-  where,
-  serverTimestamp,
-} from "firebase/firestore";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/AuthContext";
+import { reserveSlot, freeSlot } from "@/lib/bookedSlots";
 import { notifyDoctorOfNewRequest } from "@/hooks/useNotifications";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
@@ -126,23 +120,16 @@ function PaymentContent() {
       // En production : remplacer par l'appel API Orange Money / Wave / Stripe
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      // ── Étape 2 : Vérification que le créneau est encore libre ──
-      const slotDate = new Date(Number(date));
+      // ── Étape 2 : Réservation ATOMIQUE du créneau ──
+      // Crée le doc bookedSlots/{doctorId}_{ms} ("create only") :
+      // si un autre patient a pris le créneau entre-temps, ça échoue.
+      const slotMs = Number(date);
+      const slotDate = new Date(slotMs);
       const pad = (n: number) => String(n).padStart(2, "0");
       const dateString = `${slotDate.getFullYear()}-${pad(slotDate.getMonth() + 1)}-${pad(slotDate.getDate())}T${pad(slotDate.getHours())}:${pad(slotDate.getMinutes())}:00.000`;
 
-      // Un créneau est occupé s'il existe un RDV confirmé OU en attente
-      // de validation (pending) à cette date chez ce médecin.
-      const q = query(
-        collection(db, "appointments"),
-        where("doctorId", "==", doctorId),
-        where("date", "==", dateString),
-        where("status", "in", ["confirmed", "pending"]),
-      );
-      const snap = await getDocs(q);
-
-      // Créneau pris entre-temps → erreur
-      if (!snap.empty) {
+      const reserved = await reserveSlot(doctorId, slotMs);
+      if (!reserved) {
         setError(
           "❌ Ce créneau vient d'être pris. Veuillez choisir un autre créneau.",
         );
@@ -157,7 +144,9 @@ function PaymentContent() {
       // ── Étape 4 : Écriture du RDV dans Firestore ──
       // On ajoute les champs de paiement : paid, paymentRef, paymentMethod
       const patientName = user.displayName || user.email || "Patient";
-      const apptRef = await addDoc(collection(db, "appointments"), {
+      let apptRef;
+      try {
+        apptRef = await addDoc(collection(db, "appointments"), {
         doctorId: doctorId,
         doctorName: doctorName,
         specialty: specialty,
@@ -181,8 +170,13 @@ function PaymentContent() {
         amount: amount, // montant en GNF
         paymentMode: "simulation", // à changer en "production" plus tard
 
-        createdAt: serverTimestamp(),
-      });
+          createdAt: serverTimestamp(),
+        });
+      } catch (err) {
+        // Échec de la création du RDV → on libère le créneau réservé.
+        await freeSlot(doctorId, slotMs);
+        throw err;
+      }
 
       // ── Étape 4 bis : Notifie le médecin de la nouvelle demande ──
       await notifyDoctorOfNewRequest({

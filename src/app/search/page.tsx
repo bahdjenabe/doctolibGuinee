@@ -21,13 +21,10 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { listenAllBookedSlots, BookedSlot } from "@/lib/bookedSlots";
 
 import { Doctor } from "@/types/doctor";
-import {
-  cleanWorkingHours,
-  normalizeTime,
-  countAvailable,
-} from "@/lib/slots";
+import { cleanWorkingHours, countAvailable } from "@/lib/slots";
 
 import SearchBar from "@/components/search/SearchBar";
 import SearchFilters from "@/components/search/SearchFilters";
@@ -49,7 +46,7 @@ function SearchContent() {
   const [filteredDoctors, setFilteredDoctors] = useState<Doctor[]>([]);
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
   const [searchInput, setSearchInput] = useState(urlQuery);
-  const [appointments, setAppointments] = useState<any[]>([]);
+  const [bookedSlots, setBookedSlots] = useState<BookedSlot[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
 
@@ -97,10 +94,7 @@ function SearchContent() {
     // Disponibilité du jour pour un médecin donné
     const isAvailableToday = (d: Doctor): boolean => {
       const booked = new Set<number>(
-        appointments
-          .filter((a) => a.doctorId === d.id && a.status !== "cancelled")
-          .map((a) => normalizeTime(a.date))
-          .filter((t): t is number => t !== null),
+        bookedSlots.filter((s) => s.doctorId === d.id).map((s) => s.time),
       );
       return countAvailable(todayStr, d.workingHours || {}, booked) > 0;
     };
@@ -124,7 +118,7 @@ function SearchContent() {
     specialtyFilter,
     cityFilter,
     onlyAvailableToday,
-    appointments,
+    bookedSlots,
   ]);
 
   // ──────────────────────────────────────────
@@ -210,28 +204,22 @@ function SearchContent() {
     setSelectedSlot(null);
   }, [filteredDoctors, selectedDoctor]);
 
-  // ÉCOUTE TEMPS RÉEL DES APPOINTMENTS
-  // Quand un RDV est annulé → le créneau redevient libre
+  // ÉCOUTE TEMPS RÉEL DES CRÉNEAUX PRIS (collection publique bookedSlots)
+  // Quand un RDV est annulé → le doc est supprimé → créneau libre
   // ──────────────────────────────────────────
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "appointments"), (snap) => {
-      setAppointments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    const unsub = listenAllBookedSlots(setBookedSlots);
     return () => unsub();
   }, []);
 
   // ──────────────────────────────────────────
   // bookedSet
   // Construit le Set des créneaux réservés pour le médecin sélectionné.
-  // status !== "cancelled" → les annulés libèrent le créneau.
   // ──────────────────────────────────────────
   const bookedSet = new Set<number>(
-    appointments
-      .filter(
-        (a) => a.doctorId === selectedDoctor?.id && a.status !== "cancelled",
-      )
-      .map((a) => normalizeTime(a.date))
-      .filter((t): t is number => t !== null),
+    bookedSlots
+      .filter((s) => s.doctorId === selectedDoctor?.id)
+      .map((s) => s.time),
   );
 
   // ──────────────────────────────────────────

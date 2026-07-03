@@ -18,6 +18,8 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 import { useAuth } from "@/context/AuthContext";
 import GuestRoute from "@/components/GuestRoute";
 
@@ -56,6 +58,27 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [resetInfo, setResetInfo] = useState(""); // message "email envoyé"
+
+  // ── Mot de passe oublié → email de réinitialisation Firebase ──
+  const handleForgotPassword = async () => {
+    setError("");
+    setResetInfo("");
+    if (!email.trim()) {
+      setError(
+        "Entrez d'abord votre adresse email ci-dessous, puis cliquez à nouveau sur « Mot de passe oublié ? ».",
+      );
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setResetInfo(
+        "Email envoyé ! Consultez votre boîte de réception (et vos spams) pour réinitialiser votre mot de passe.",
+      );
+    } catch (err: any) {
+      setError(translateError(err.code));
+    }
+  };
 
   // Si déjà connecté → redirection immédiate vers la destination
   useEffect(() => {
@@ -266,6 +289,7 @@ function LoginContent() {
 
                     <button
                       type="button"
+                      onClick={handleForgotPassword}
                       className="text-xs text-blue-600 hover:underline"
                     >
                       Mot de passe oublié ?
@@ -297,6 +321,13 @@ function LoginContent() {
                 {error && (
                   <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-2xl">
                     {error}
+                  </div>
+                )}
+
+                {/* EMAIL DE RÉINITIALISATION ENVOYÉ */}
+                {resetInfo && (
+                  <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-2xl">
+                    ✉️ {resetInfo}
                   </div>
                 )}
 

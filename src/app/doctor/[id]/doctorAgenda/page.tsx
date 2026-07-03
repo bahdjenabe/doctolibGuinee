@@ -33,6 +33,7 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { freeSlot } from "@/lib/bookedSlots";
 
 // Types + helpers
 import { Appointment, Doctor, AgendaFilter } from "@/types/agenda";
@@ -149,6 +150,9 @@ export default function DoctorAgendaPage() {
         cancelReason: reason, // raison choisie par le médecin
         cancelledAt: serverTimestamp(),
       });
+
+      // 1 bis. Libère le créneau public (bookedSlots)
+      await freeSlot(cancelAppt.doctorId || (id as string), cancelAppt.date);
 
       // 2. Notifie le patient (crée un doc dans "notifications")
       // Le patient verra la notification dans sa cloche en temps réel

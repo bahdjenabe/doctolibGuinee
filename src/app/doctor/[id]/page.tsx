@@ -25,12 +25,8 @@ import { doc, getDoc, collection, onSnapshot, query, where } from "firebase/fire
 
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/AuthContext";
-import {
-  generateSlots,
-  getDayName,
-  normalizeTime,
-  cleanWorkingHours,
-} from "@/lib/slots";
+import { listenDoctorBookedSlots } from "@/lib/bookedSlots";
+import { generateSlots, getDayName, cleanWorkingHours } from "@/lib/slots";
 import { DAYS } from "@/types/schedule";
 import { Review } from "@/types/review";
 import { averageRating } from "@/lib/reviews";
@@ -79,7 +75,7 @@ export default function DoctorPage() {
   // ================== STATE ==================
   const [doctor, setDoctor] = useState<DoctorProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [appointments, setAppointments] = useState<any[]>([]);
+  const [bookedTimes, setBookedTimes] = useState<Set<number>>(new Set());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(
     slotFromSearch,
@@ -121,16 +117,12 @@ export default function DoctorPage() {
     if (id) fetchDoctor();
   }, [id]);
 
-  // ================== REALTIME APPOINTMENTS ==================
+  // ================== REALTIME BOOKED SLOTS ==================
+  // Créneaux pris via la collection publique bookedSlots (aucune
+  // donnée personnelle — les RDV eux-mêmes ne sont plus lisibles ici).
   useEffect(() => {
     if (!doctor?.id) return;
-    const q = query(
-      collection(db, "appointments"),
-      where("doctorId", "==", doctor.id),
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      setAppointments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    const unsub = listenDoctorBookedSlots(doctor.id, setBookedTimes);
     return () => unsub();
   }, [doctor?.id]);
 
@@ -164,16 +156,7 @@ export default function DoctorPage() {
   const displayCount = reviews.length > 0 ? reviews.length : doctor?.reviews || 0;
 
   // ================== BOOKED SLOTS ==================
-  const bookedSet = useMemo(
-    () =>
-      new Set<number>(
-        appointments
-          .filter((a) => a.status !== "cancelled")
-          .map((a) => normalizeTime(a.date))
-          .filter((t): t is number => t !== null),
-      ),
-    [appointments],
-  );
+  const bookedSet = bookedTimes;
 
   // ================== DEFAULT SELECTED DATE ==================
   // Si on arrive avec un créneau → on prend son jour.

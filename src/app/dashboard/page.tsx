@@ -29,11 +29,11 @@ import {
   onSnapshot,
   doc,
   updateDoc,
-  getDocs,
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/AuthContext";
+import { reserveSlot, freeSlot } from "@/lib/bookedSlots";
 
 // Types + helpers
 import { isUpcoming, parseDate } from "@/lib/dashboard";
@@ -215,6 +215,9 @@ export default function DashboardPage() {
         cancelledAt: serverTimestamp(),
       });
 
+      // 1 bis. Libère le créneau public (bookedSlots)
+      await freeSlot(appt.doctorId, appt.date);
+
       // 2. Notifie le médecin (crée un doc dans "notifications")
       await notifyDoctorOfCancellation({
         doctorId: appt.doctorId,
@@ -259,16 +262,9 @@ export default function DashboardPage() {
         `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
         `T${pad(d.getHours())}:${pad(d.getMinutes())}:00.000`;
 
-      // Vérifie que le créneau n'est pas déjà pris chez ce médecin
-      const conflictQ = query(
-        collection(db, "appointments"),
-        where("doctorId", "==", appt.doctorId),
-        where("date", "==", dateString),
-        where("status", "in", ["confirmed", "pending"]),
-      );
-      const conflictSnap = await getDocs(conflictQ);
-      const taken = conflictSnap.docs.some((doc) => doc.id !== rescheduleId);
-      if (taken) {
+      // Réservation ATOMIQUE du nouveau créneau (bookedSlots).
+      const reserved = await reserveSlot(appt.doctorId, newSlot);
+      if (!reserved) {
         setRescheduleError("Ce créneau vient d'être pris. Choisissez-en un autre.");
         setRescheduling(false);
         return;
@@ -278,10 +274,19 @@ export default function DashboardPage() {
       const oldDate = appt.date;
 
       // Met à jour la date du RDV
-      await updateDoc(doc(db, "appointments", rescheduleId), {
-        date: dateString,
-        rescheduledAt: serverTimestamp(),
-      });
+      try {
+        await updateDoc(doc(db, "appointments", rescheduleId), {
+          date: dateString,
+          rescheduledAt: serverTimestamp(),
+        });
+      } catch (err) {
+        // Échec → on libère le créneau qu'on venait de réserver.
+        await freeSlot(appt.doctorId, newSlot);
+        throw err;
+      }
+
+      // Libère l'ancien créneau
+      await freeSlot(appt.doctorId, oldDate);
 
       // Notifie le médecin du changement de créneau
       await notifyDoctorOfReschedule({

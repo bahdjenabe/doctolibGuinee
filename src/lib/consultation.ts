@@ -20,11 +20,31 @@
 
 import { parseDate } from "@/lib/dashboard";
 
-// Serveurs STUN publics de Google (traversée NAT basique).
+// Serveurs ICE : STUN publics de Google + serveur TURN optionnel.
+// Le TURN est indispensable en production pour traverser les NAT
+// stricts (4G, wifi d'entreprise). Configuration via variables d'env
+// (Vercel → Settings → Environment Variables) :
+//   NEXT_PUBLIC_TURN_URL        ex: turn:global.relay.metered.ca:80
+//   NEXT_PUBLIC_TURN_USERNAME
+//   NEXT_PUBLIC_TURN_CREDENTIAL
+const iceServers: RTCIceServer[] = [
+  { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
+];
+
+if (
+  process.env.NEXT_PUBLIC_TURN_URL &&
+  process.env.NEXT_PUBLIC_TURN_USERNAME &&
+  process.env.NEXT_PUBLIC_TURN_CREDENTIAL
+) {
+  iceServers.push({
+    urls: process.env.NEXT_PUBLIC_TURN_URL.split(","),
+    username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+    credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
+  });
+}
+
 export const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
-    { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
-  ],
+  iceServers,
   iceCandidatePoolSize: 10,
 };
 

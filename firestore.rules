@@ -25,6 +25,14 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Vrai si l'utilisateur connecté est administrateur.
+    // Un admin = un document admins/{uid} (créé UNIQUEMENT via la
+    // console Firebase — aucune écriture client n'est autorisée).
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
     // Vrai si la mise à jour ne touche QUE les champs listés.
     function onlyChanges(keys) {
       return request.resource.data.diff(resource.data)
@@ -119,10 +127,11 @@ service cloud.firestore {
     // PATIENTS
     // ════════════════════════════════════════════════════════
     match /patients/{patientId} {
-      // Chacun ne lit/écrit que sa propre fiche.
-      // ⚠️ La page /admin/users (liste de TOUS les patients) ne
-      //    fonctionnera plus sans un rôle "admin" (custom claim).
-      allow read, create, update: if isSignedIn()
+      // Chacun lit/écrit sa propre fiche ; l'admin peut tout lire
+      // (nécessaire pour la page /admin/users).
+      allow read: if (isSignedIn() && request.auth.uid == patientId)
+        || isAdmin();
+      allow create, update: if isSignedIn()
         && request.auth.uid == patientId;
       allow delete: if false;
 
@@ -219,6 +228,40 @@ service cloud.firestore {
     // Un document appartient à un patient. Le patient gère les siens ;
     // un médecin peut en déposer pour un patient (compte-rendu...).
     // ════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════
+    // BOOKED SLOTS (créneaux occupés — AUCUNE donnée personnelle)
+    // Doc id = {doctorId}_{timeMs}. Lecture publique pour afficher
+    // les disponibilités ; "create only" (pas d'update) = réservation
+    // atomique : le 2e patient sur le même créneau est refusé.
+    // ════════════════════════════════════════════════════════
+    match /bookedSlots/{slotId} {
+      allow read: if true;
+
+      // Créneau réservé par un utilisateur connecté ; le doc ne doit
+      // contenir que doctorId / time / createdAt.
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['doctorId', 'time', 'createdAt'])
+        && slotId == request.resource.data.doctorId + '_' + string(request.resource.data.time);
+
+      // Jamais de modification (garantit l'atomicité de la réservation).
+      allow update: if false;
+
+      // Libération du créneau (annulation / reprogrammation).
+      allow delete: if isSignedIn();
+    }
+
+    // ════════════════════════════════════════════════════════
+    // ADMINS
+    // Un doc admins/{uid} (contenu libre, ex: { role: "admin" })
+    // marque un utilisateur comme administrateur. Création/suppression
+    // UNIQUEMENT via la console Firebase.
+    // ════════════════════════════════════════════════════════
+    match /admins/{adminId} {
+      // Chacun peut vérifier son propre statut d'admin.
+      allow read: if isSignedIn() && request.auth.uid == adminId;
+      allow write: if false;
+    }
+
     match /documents/{documentId} {
       allow read: if isSignedIn()
         && (resource.data.patientId == request.auth.uid
