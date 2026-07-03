@@ -8,7 +8,7 @@
 //   - Ordonnances : ordonnances reçues des médecins (consulter/imprimer)
 //   - Documents   : fichiers déposés par le patient (analyses, imagerie…)
 //
-// Upload via Firebase Storage (voir src/lib/documents.ts).
+// Upload en base64 dans Firestore (voir src/lib/documents.ts).
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
@@ -20,6 +20,8 @@ import {
   listenDocuments,
   uploadDocument,
   deleteDocument,
+  openDocument,
+  FileTooLargeError,
 } from "@/lib/documents";
 import {
   Prescription,
@@ -87,7 +89,9 @@ function DocumentsContent() {
     } catch (e: any) {
       console.error(e);
       setUploadError(
-        "Échec de l'envoi. Vérifiez le format (PDF/image) et la taille (< 10 Mo).",
+        e instanceof FileTooLargeError
+          ? e.message
+          : "Échec de l'envoi. Vérifiez le format (PDF/image) et réessayez.",
       );
     } finally {
       setUploading(false);
@@ -269,7 +273,8 @@ function DocumentsContent() {
                 {uploading ? "Envoi en cours…" : "Envoyer le document"}
               </button>
               <p className="mt-2 text-[11px] text-gray-400">
-                Formats acceptés : PDF, images. Taille max : 10 Mo.
+                Formats acceptés : PDF (max 700 Ko) et images — les photos
+                sont compressées automatiquement.
               </p>
             </div>
 
@@ -301,14 +306,12 @@ function DocumentsContent() {
                         {d.size ? ` · ${formatSize(d.size)}` : ""}
                       </p>
                     </div>
-                    <a
-                      href={d.fileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={() => openDocument(d)}
                       className="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
                     >
                       Ouvrir
-                    </a>
+                    </button>
                     <button
                       onClick={() => handleDelete(d)}
                       className="text-xs font-medium px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors"

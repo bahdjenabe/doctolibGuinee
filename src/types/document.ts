@@ -36,15 +36,19 @@ export const DOCUMENT_CATEGORIES = [
 
 export type DocumentCategory = (typeof DOCUMENT_CATEGORIES)[number];
 
-// Un document (le fichier est stocké dans Firebase Storage).
+// Un document déposé par le patient.
+// Le fichier est stocké en base64 (dataUrl) directement dans Firestore
+// (Firebase Storage nécessite le forfait Blaze, non activé pour l'instant).
+// Limite Firestore : 1 Mo par document → fichier source ≤ ~700 Ko.
 export type PatientDocument = {
   id:           string;
   ownerId:      string;   // UID de celui qui a déposé
   patientId:    string;   // dossier médical concerné
   name:         string;
   category:     DocumentCategory;
-  fileUrl:      string;
-  storagePath:  string;
+  dataUrl?:     string;   // fichier encodé en base64 (data:...)
+  fileUrl?:     string;   // héritage Storage (non utilisé actuellement)
+  storagePath?: string;   // héritage Storage (non utilisé actuellement)
   size?:        number;
   contentType?: string;
   createdAt?:   any;
