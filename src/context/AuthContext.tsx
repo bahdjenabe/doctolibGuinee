@@ -58,8 +58,10 @@ const AuthContext = createContext<AuthContextType>({
 // COOKIE HELPERS
 // ============================================================
 
-const setSessionCookie = () => {
-  const expires = new Date(Date.now() + SESSION_DURATION);
+// Le cookie expire au même moment que la session (expiryMs).
+// Sans argument : nouvelle session → maintenant + SESSION_DURATION.
+const setSessionCookie = (expiryMs?: number) => {
+  const expires = new Date(expiryMs ?? Date.now() + SESSION_DURATION);
   document.cookie = `${SESSION_COOKIE}=true; expires=${expires.toUTCString()}; path=/; SameSite=Strict`;
 };
 
@@ -125,9 +127,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null);
           window.location.href = "/login";
         } else {
-          // Session encore valide → on renouvelle cookie et expiry
-          setSessionCookie();
-          setSessionExpiry();
+          // Session encore valide → on NE renouvelle PAS l'expiry :
+          // la session dure SESSION_DURATION après la connexion, point.
+          // (La renouveler ici repoussait l'échéance à chaque visite,
+          // et la déconnexion automatique n'arrivait jamais.)
+          // On resynchronise seulement le cookie sur l'échéance restante.
+          setSessionCookie(expiry);
           setUser(firebaseUser);
         }
       } else {
@@ -154,30 +159,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) return;
 
-    const interval = setInterval(async () => {
+    const checkExpiry = async () => {
       const expiry = getSessionExpiry();
 
       // Pas d'expiry défini → ne rien faire
       if (!expiry) return;
 
-      const isExpired = Date.now() > expiry;
-
-      if (isExpired) {
+      if (Date.now() > expiry) {
         console.log("[Auth] Session expirée → déconnexion automatique");
 
-        // Déconnexion Firebase
+        // Déconnexion Firebase + nettoyage
         await signOut(auth);
-
-        // Nettoyage
         removeSessionCookie();
         clearSessionExpiry();
 
         // Redirection vers login
         window.location.href = "/login";
       }
-    }, 60 * 1000); // vérification toutes les 60 secondes
+    };
 
-    return () => clearInterval(interval);
+    // Vérification périodique (60 s) + immédiate quand l'utilisateur
+    // revient sur l'onglet (sinon il faudrait attendre le prochain tick).
+    const interval = setInterval(checkExpiry, 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") checkExpiry();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [user]);
 
   // ============================================================
