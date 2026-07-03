@@ -61,14 +61,13 @@ service cloud.firestore {
     // APPOINTMENTS
     // ════════════════════════════════════════════════════════
     match /appointments/{appointmentId} {
-      // ⚠️ LECTURE PUBLIQUE — choix lié à l'architecture actuelle :
-      // la recherche (/search) et la fiche médecin (/doctor/[id]) lisent
-      // les RDV SANS connexion pour afficher les créneaux déjà pris.
-      // Conséquence : les champs du RDV (dont patientName) sont visibles
-      // par tout visiteur. Pour fermer cela, voir la note "vie privée"
-      // (il faut alors restreindre la lecture aux participants et calculer
-      // les disponibilités autrement).
-      allow read: if true;
+      // Lecture réservée aux participants (patient / médecin) et à
+      // l'admin. Les disponibilités publiques passent par la collection
+      // bookedSlots (aucune donnée personnelle).
+      allow read: if isSignedIn()
+        && (resource.data.patientId == request.auth.uid
+            || resource.data.doctorId == request.auth.uid
+            || isAdmin());
 
       // Le patient crée SON propre rendez-vous.
       allow create: if isSignedIn()
